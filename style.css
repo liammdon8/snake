@@ -1,0 +1,556 @@
+:root {
+    --bg-color: #0f0c29;
+    --game-bg: rgba(20, 20, 30, 0.8);
+    --text-color: #ffffff;
+    --snake-color: #00ff87;
+    --food-color: #ff0055;
+    --accent-color: #60efff;
+    --grid-color: rgba(255, 255, 255, 0.03);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: 'Outfit', sans-serif;
+    /* 防止移动端双击缩放和高亮 */
+    -webkit-tap-highlight-color: transparent;
+}
+
+html {
+    background-color: var(--bg-color);
+}
+
+body {
+    background: linear-gradient(135deg, var(--bg-color), #302b63, #24243e);
+    color: var(--text-color);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    touch-action: none; /* 禁止默认触摸动作，如缩放 */
+}
+
+.game-container {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 30px;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    max-height: 100vh;
+    overflow-y: auto;
+    position: relative; /* 为绝对定位按钮提供参考 */
+}
+
+.top-controls {
+    display: none; /* 默认隐藏，仅移动端显示 */
+}
+
+.header-main {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1;
+}
+
+/* 震动动画 */
+@keyframes shake {
+    0% { transform: translate(0, 0); }
+    25% { transform: translate(-5px, 5px); }
+    50% { transform: translate(5px, -5px); }
+    75% { transform: translate(-5px, -5px); }
+    100% { transform: translate(0, 0); }
+}
+
+.shake {
+    animation: shake 0.2s cubic-bezier(.36,.07,.19,.97) both;
+}
+
+header {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+    flex-shrink: 0;
+    padding: 0 10px;
+}
+
+h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    background: linear-gradient(45deg, var(--snake-color), var(--accent-color));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 0 20px rgba(0, 255, 135, 0.3);
+    text-align: left;
+}
+
+.score-board {
+    display: flex;
+    gap: 20px;
+    width: 100%;
+    justify-content: flex-start;
+}
+
+.score-box {
+    background: rgba(0, 0, 0, 0.4);
+    padding: 10px 20px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 100px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+}
+
+.score-box span:first-child {
+    font-size: 0.8rem;
+    color: #a0a0b0;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.score-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--accent-color);
+    text-shadow: 0 0 10px rgba(96, 239, 255, 0.5);
+}
+
+.canvas-wrapper {
+    position: relative;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.5), 
+                0 0 20px rgba(0, 255, 135, 0.2) inset;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    background-color: var(--game-bg);
+    flex-shrink: 0;
+    width: 400px;
+    height: 400px;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    object-fit: fill; /* 强制填满容器 */
+}
+
+.overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(5px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+    transition: opacity 0.3s ease;
+    z-index: 10;
+}
+
+.overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.overlay h2 {
+    font-size: 2.5rem;
+    color: var(--food-color);
+    text-shadow: 0 0 15px rgba(255, 0, 85, 0.6);
+    margin-bottom: 10px;
+}
+
+.overlay p {
+    font-size: 1.2rem;
+    color: #e0e0e0;
+}
+
+#final-score {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: var(--snake-color);
+}
+
+.glow-on-hover {
+    padding: 12px 30px;
+    border: none;
+    outline: none;
+    color: #fff;
+    background: #111;
+    cursor: pointer;
+    position: relative;
+    z-index: 0;
+    border-radius: 10px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.3s ease;
+}
+
+.glow-on-hover:before {
+    content: '';
+    background: linear-gradient(45deg, #ff0000, #ff7300, #fffb00, #48ff00, #00ffd5, #002bff, #7a00ff, #ff00c8, #ff0000);
+    position: absolute;
+    top: -2px;
+    left:-2px;
+    background-size: 400%;
+    z-index: -1;
+    filter: blur(5px);
+    width: calc(100% + 4px);
+    height: calc(100% + 4px);
+    animation: glowing 20s linear infinite;
+    opacity: 0;
+    transition: opacity .3s ease-in-out;
+    border-radius: 10px;
+}
+
+.glow-on-hover:active {
+    color: #000;
+    transform: scale(0.95);
+}
+
+.glow-on-hover:active:after {
+    background: transparent;
+}
+
+.glow-on-hover:hover:before {
+    opacity: 1;
+}
+
+.glow-on-hover:after {
+    z-index: -1;
+    content: '';
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: rgba(30, 30, 40, 0.8);
+    left: 0;
+    top: 0;
+    border-radius: 10px;
+}
+
+@keyframes glowing {
+    0% { background-position: 0 0; }
+    50% { background-position: 400% 0; }
+    100% { background-position: 0 0; }
+}
+
+.controls-hint {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 15px 25px;
+    border-radius: 10px;
+    text-align: center;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.controls-hint p {
+    font-size: 0.9rem;
+    color: #b0b0c0;
+    margin: 5px 0;
+}
+
+/* 虚拟控制按钮样式 */
+.virtual-controls {
+    display: none; /* 默认隐藏 */
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    width: 100%;
+    padding-bottom: 10px;
+    user-select: none;
+}
+
+.control-row {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    width: 100%;
+}
+
+.d-pad-btn {
+    width: 65px;
+    height: 65px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--text-color);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 1.5rem;
+    cursor: pointer;
+    backdrop-filter: blur(5px);
+    transition: all 0.1s ease;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+}
+
+.d-pad-btn svg {
+    width: 32px;
+    height: 32px;
+    pointer-events: none; /* 防止点击SVG不触发按钮事件 */
+}
+
+.d-pad-spacer {
+    width: 65px;
+    height: 65px;
+    visibility: hidden;
+}
+
+.d-pad-btn:active, .d-pad-btn.active {
+    background: var(--snake-color);
+    color: #000;
+    transform: scale(0.92);
+    box-shadow: 0 0 20px var(--snake-color), inset 0 0 10px rgba(0,0,0,0.5);
+    border-color: var(--snake-color);
+}
+
+/* 移动端特定控件 - 默认隐藏 */
+.mobile-controls-area {
+    display: none;
+    width: 100%;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+}
+
+.switch-btn {
+    background: rgba(0, 255, 135, 0.15);
+    border: 1px solid var(--snake-color);
+    color: var(--snake-color);
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    backdrop-filter: blur(5px);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+/* 网格模式颜色 */
+.switch-btn.grid-mode {
+    background: rgba(0, 255, 135, 0.15);
+    border-color: var(--snake-color);
+    color: var(--snake-color);
+}
+
+/* 自由模式颜色 */
+.switch-btn.free-mode {
+    background: rgba(96, 239, 255, 0.15);
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+
+.switch-btn:active {
+    transform: scale(0.95);
+}
+
+/* 摇杆样式 */
+#joystick-container {
+    width: 100%;
+    height: 180px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+#joystick-container.hidden, #dpad-container.hidden {
+    display: none !important;
+}
+
+#joystick-zone {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.05);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    position: relative;
+    box-shadow: 0 0 15px rgba(0, 0, 0, 0.3) inset;
+}
+
+#joystick-knob {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: var(--snake-color);
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 10px var(--snake-color);
+    pointer-events: none; /* 让触摸事件穿透到 zone */
+    transition: transform 0.1s; /* 添加一点平滑回弹，但在拖动时我们会覆盖这个 */
+}
+
+.joystick-hint {
+    margin-top: 10px;
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+    body {
+        align-items: flex-start; /* 防止键盘弹出遮挡 */
+        padding-top: 0;
+        overflow-y: hidden; /* 禁止页面滚动 */
+        height: 100vh;
+        position: fixed; /* 锁定页面 */
+        width: 100%;
+    }
+
+    .game-container {
+        width: 100%;
+        max-width: 100%;
+        height: 100vh;
+        border-radius: 0;
+        border: none;
+        padding: 10px;
+        justify-content: flex-start;
+        gap: 10px;
+        background: linear-gradient(180deg, rgba(15, 12, 41, 0.95) 0%, rgba(30, 25, 60, 0.95) 100%);
+        box-shadow: none;
+        backdrop-filter: none;
+        overflow: hidden;
+        position: relative;
+    }
+
+    .top-controls.mobile-only {
+        display: block; /* 仅移动端显示 */
+        position: static;
+    }
+    
+    header {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+        padding: 5px 10px;
+        height: auto;
+        min-height: 50px;
+        gap: 10px;
+        margin-bottom: 5px;
+        width: 100%;
+    }
+
+    h1 {
+        display: none; 
+    }
+    
+    .header-main {
+        width: auto;
+        flex: 1;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: flex-start;
+    }
+
+    .score-board {
+        width: auto;
+        display: flex;
+        justify-content: flex-start;
+        gap: 8px;
+    }
+
+    .score-box {
+        min-width: 70px;
+        padding: 4px 10px;
+        flex: none;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 0;
+        background: rgba(0, 0, 0, 0.3);
+    }
+
+    .score-box span:first-child {
+        font-size: 0.6rem;
+    }
+
+    .score-value {
+        font-size: 1.1rem;
+    }
+    
+    .top-controls {
+        display: block !important;
+        margin-left: auto;
+        width: auto;
+    }
+
+    .switch-btn {
+        padding: 6px 12px;
+        font-size: 0.8rem;
+    }
+    
+    .canvas-wrapper {
+        width: 100%;
+        max-width: none; 
+        height: auto;
+        flex: 1; /* 核心：占据中间剩余的所有空间 */
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin: 0;
+        background: rgba(0,0,0,0.2);
+        border-radius: 5px;
+    }
+    
+    canvas {
+        width: 100%;
+        height: 100%;
+        object-fit: fill; 
+    }
+
+    .controls-hint {
+        display: none; 
+    }
+    
+    .mobile-controls-area {
+        display: flex; /* 显示移动端控件 */
+        margin-top: auto; 
+        padding-bottom: 20px;
+        height: 220px; 
+        justify-content: flex-start;
+    }
+    
+    /* 调整虚拟按键布局 */
+    .virtual-controls {
+        display: flex;
+        transform: scale(0.9); /* 稍微缩小以适应 */
+        margin-top: 0;
+    }
+}
+
+/* 全局隐藏辅助类 */
+.hidden {
+    display: none !important;
+}

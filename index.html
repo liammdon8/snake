@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>霓虹贪吃蛇</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="game-container">
+        <header>
+            <div class="header-main">
+                <h1>霓虹贪吃蛇</h1>
+                <div class="score-board">
+                    <div class="score-box">
+                        <span>得分</span>
+                        <span id="score" class="score-value">0</span>
+                    </div>
+                    <div class="score-box">
+                        <span>最高分</span>
+                        <span id="high-score" class="score-value">0</span>
+                    </div>
+                </div>
+            </div>
+            <!-- 模式切换按钮移入 header 内部，便于移动端右侧展示 -->
+            <div class="top-controls mobile-only">
+                <button id="toggle-mode-btn" class="switch-btn">
+                    <span class="icon">🕹️</span> 网格模式
+                </button>
+            </div>
+        </header>
+
+        <div class="canvas-wrapper">
+            <canvas id="gameCanvas"></canvas>
+            <div id="game-over-screen" class="overlay hidden">
+                <h2>游戏结束</h2>
+                <p>最终得分: <span id="final-score">0</span></p>
+                <button id="restart-btn" class="glow-on-hover">重新开始</button>
+            </div>
+            <div id="pause-screen" class="overlay hidden">
+                <h2>已暂停</h2>
+                <p>按空格键继续</p>
+            </div>
+            <div id="start-screen" class="overlay">
+                <h2>准备好了吗？</h2>
+                <p>使用方向键移动</p>
+                <button id="start-btn" class="glow-on-hover">开始游戏</button>
+            </div>
+        </div>
+
+        <div class="controls-hint">
+            <p>⌨️ 控制：上 (↑) 下 (↓) 左 (←) 右 (→)</p>
+            <p>⏸️ 暂停：按空格键</p>
+        </div>
+
+        <!-- 移动端控制容器 -->
+        <div id="mobile-control-area" class="mobile-controls-area hidden">
+            <!-- 摇杆控制器 -->
+            <div id="joystick-container" class="control-container hidden">
+                <div id="joystick-zone">
+                    <div id="joystick-knob"></div>
+                </div>
+                <div class="joystick-hint">拖动摇杆控制方向</div>
+            </div>
+
+            <!-- 按键控制器 -->
+            <div id="dpad-container" class="control-container">
+                <div class="virtual-controls" id="mobile-controls">
+                    <div class="control-row">
+                        <button class="d-pad-btn" id="btn-up" data-key="ArrowUp">
+                            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
+                        </button>
+                    </div>
+                    <div class="control-row">
+                        <button class="d-pad-btn" id="btn-left" data-key="ArrowLeft">
+                            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M15.41 7.41L10.83 12l4.58 4.59L14 18l-6-6 6-6z"/></svg>
+                        </button>
+                        <div class="d-pad-spacer"></div>
+                        <button class="d-pad-btn" id="btn-right" data-key="ArrowRight">
+                            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                        </button>
+                    </div>
+                    <div class="control-row">
+                        <button class="d-pad-btn" id="btn-down" data-key="ArrowDown">
+                            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
