@@ -47,6 +47,26 @@
                 <p>使用方向键移动</p>
                 <button id="start-btn" class="glow-on-hover">开始游戏</button>
             </div>
+            <!-- 狂暴模式指示器 -->
+            <div id="rage-indicator" class="rage-indicator hidden">
+                <div class="rage-badge">
+                    <span class="rage-icon">🔥</span>
+                    <span class="rage-label">狂暴模式</span>
+                </div>
+                <div class="rage-stats">
+                    <span id="rage-timer">30s</span>
+                    <span class="rage-sep">|</span>
+                    <span id="rage-coverage">0%</span>
+                </div>
+            </div>
+            <!-- 胜利画面 -->
+            <div id="victory-screen" class="overlay hidden">
+                <div class="victory-content">
+                    <h2 class="victory-title">终极胜利!</h2>
+                    <p class="victory-score">最终得分: <span id="victory-score-value">0</span></p>
+                    <button id="victory-restart-btn" class="glow-on-hover">再来一局</button>
+                </div>
+            </div>
         </div>
 
         <div class="controls-hint">
@@ -61,7 +81,6 @@
                 <div id="joystick-zone">
                     <div id="joystick-knob"></div>
                 </div>
-                <div class="joystick-hint">拖动摇杆控制方向</div>
             </div>
 
             <!-- 按键控制器 -->
@@ -90,6 +109,8 @@
             </div>
         </div>
     </div>
+    <!-- 全屏撒花画布（独立于overlay，避免被裁剪） -->
+    <canvas id="confetti-canvas" class="confetti-canvas hidden"></canvas>
     <script src="script.js"></script>
 </body>
 </html>

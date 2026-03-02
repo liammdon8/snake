@@ -8,6 +8,14 @@ const startScreen = document.getElementById('start-screen');
 const restartBtn = document.getElementById('restart-btn');
 const startBtn = document.getElementById('start-btn');
 const pauseScreen = document.getElementById('pause-screen');
+const rageIndicator = document.getElementById('rage-indicator');
+const rageTimerEl = document.getElementById('rage-timer');
+const rageCoverageEl = document.getElementById('rage-coverage');
+const victoryScreen = document.getElementById('victory-screen');
+const victoryScoreValue = document.getElementById('victory-score-value');
+const victoryRestartBtn = document.getElementById('victory-restart-btn');
+const confettiCanvas = document.getElementById('confetti-canvas');
+const confettiCtx = confettiCanvas ? confettiCanvas.getContext('2d') : null;
 
 // 移动端控件
 const mobileControlArea = document.getElementById('mobile-control-area');
@@ -70,7 +78,37 @@ let isGameOver = false;
 let isPaused = false;
 let hasStarted = false;
 let changingDirection = false;
-let controlMode = 'dpad'; 
+let controlMode = 'dpad';
+
+// 狂暴模式变量
+let isRageMode = false;
+let rageTimer = null;
+let rageStartTime = 0;
+const RAGE_DURATION = 15000;
+const RAGE_GRID_SPEED = 25;
+const RAGE_FREE_SPEED = 16;
+
+// 三击检测
+let tapTimestamps = [];
+let lastTapTime = 0;
+const TRIPLE_TAP_WINDOW = 800;
+const TRIPLE_TAP_COUNT = 3;
+
+// AI路径
+let ragePhase = 'eat'; // 'eat' or 'fill'
+let rageFillPath = [];
+let rageFillIndex = 0;
+let rageSweepDir = 1; // 自由模式扫描方向
+let rageSweepY = 20; // 自由模式扫描当前Y
+
+// 撒花 & 胜利
+let confettiParticles = [];
+let confettiAnimFrame = null;
+let isVictoryShown = false;
+
+// 速度备份
+let savedGameSpeed = 0;
+let savedMoveSpeed = 0;
 
 // 摇杆变量
 let joystickActive = false;
@@ -89,9 +127,10 @@ window.addEventListener('resize', handleResize);
 document.addEventListener('keydown', handleKeyPress);
 restartBtn.addEventListener('click', resetGame);
 startBtn.addEventListener('click', startGame);
+if (victoryRestartBtn) victoryRestartBtn.addEventListener('click', resetFromVictory);
 
 // 添加触摸支持到按钮上
-[restartBtn, startBtn].forEach(btn => {
+[restartBtn, startBtn, victoryRestartBtn].forEach(btn => {
     btn.addEventListener('touchstart', (e) => {
         // e.preventDefault(); 
     }, { passive: true });
@@ -111,13 +150,21 @@ function handleResize() {
     // 动态设置 canvas 尺寸
     const wrapper = canvas.parentElement;
     const rect = wrapper.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
     
-    // 逻辑分辨率对齐 GRID_SIZE，确保格子完整
-    canvas.width = Math.floor(rect.width / GRID_SIZE) * GRID_SIZE;
-    canvas.height = Math.floor(rect.height / GRID_SIZE) * GRID_SIZE;
+    // 设置物理分辨率以保证清晰度
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
     
-    TILE_COUNT_X = canvas.width / GRID_SIZE;
-    TILE_COUNT_Y = canvas.height / GRID_SIZE;
+    // 设置 CSS 显示大小
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+    
+    // 缩放上下文，使绘图指令继续使用逻辑像素（CSS 像素）
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    
+    TILE_COUNT_X = rect.width / GRID_SIZE;
+    TILE_COUNT_Y = rect.height / GRID_SIZE;
 
     // 如果游戏正在运行且尺寸变化过大，需要重置一下网格渲染
     if (hasStarted && !isGameOver) {
@@ -132,6 +179,19 @@ function handleResize() {
 }
 
 function initGame() {
+    // 清理狂暴模式状态
+    if (isRageMode) deactivateRageMode();
+    isRageMode = false;
+    ragePhase = 'eat';
+    rageFillPath = [];
+    rageFillIndex = 0;
+    isVictoryShown = false;
+    tapTimestamps = [];
+    if (rageTimer) { clearTimeout(rageTimer); rageTimer = null; }
+    if (victoryScreen) victoryScreen.classList.add('hidden');
+    stopConfetti();
+    GAME_SPEED = 180;
+
     if (currentMode === MOVE_MODE.GRID) {
         // 模式一：网格逻辑
         const centerX = Math.floor(TILE_COUNT_X / 2);
@@ -144,8 +204,10 @@ function initGame() {
         dx = 1; dy = 0;
     } else {
         // 模式二：自由移动逻辑
-        const centerX = canvas.width / 2;
-        const centerY = canvas.height / 2;
+        const logicalWidth = canvas.width / (window.devicePixelRatio || 1);
+        const logicalHeight = canvas.height / (window.devicePixelRatio || 1);
+        const centerX = logicalWidth / 2;
+        const centerY = logicalHeight / 2;
         snake = [];
         // 初始长度
         for (let i = 0; i < 15; i++) {
@@ -201,52 +263,86 @@ function main() {
     if (isGameOver || isPaused) return;
 
     changingDirection = false;
-    
+
+    // 狂暴模式AI控制
+    if (isRageMode && !isVictoryShown) {
+        if (currentMode === MOVE_MODE.GRID) {
+            const dir = getRageDirectionGrid();
+            if (dir) { dx = dir.dx; dy = dir.dy; }
+        } else {
+            angle = getRageDirectionFree();
+        }
+
+        // 自动补充食物
+        if (foods.length < 5) {
+            for (let i = 0; i < 5; i++) spawnFood();
+        }
+
+        // 检查覆盖率
+        const coverage = calculateCoverage();
+        if (coverage >= 0.75) {
+            triggerUltimateVictory();
+            return;
+        }
+
+        // 更新指示器
+        updateRageIndicator(coverage);
+    }
+
     // 移动并检测
     moveSnake();
-    
-    // NPC 逻辑受开关控制
-    if (config.enableNPC) {
+
+    // NPC 逻辑受开关控制 (狂暴期间跳过)
+    if (config.enableNPC && !isRageMode) {
         moveNPCs();
         checkNPCCollisions();
     }
-    
+
     checkGameOver(); // 检查玩家是否死亡
-    
+
     if (isGameOver) {
         handleGameOver();
         return;
     }
-    
+
     // 渲染
     clearCanvas();
     drawGrid();
     drawFoods();
-    if (config.enableNPC) drawNPCs();
+    if (config.enableNPC && !isRageMode) drawNPCs();
     drawSnake();
+
+    // 狂暴模式红色渐晕
+    if (isRageMode) {
+        drawRageVignette();
+    }
 }
 
 function clearCanvas() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // 由于使用了 dpr 缩放，这里清空逻辑坐标系下的全屏区域
+    ctx.clearRect(0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
 }
 
 function drawGrid() {
+    const logicalWidth = canvas.width / (window.devicePixelRatio || 1);
+    const logicalHeight = canvas.height / (window.devicePixelRatio || 1);
+    
     ctx.strokeStyle = currentMode === MOVE_MODE.FREE ? COLORS.gridWeak : COLORS.grid;
     ctx.lineWidth = 1;
     
     // 绘制垂直线
-    for (let i = 0; i <= canvas.width; i += GRID_SIZE) {
+    for (let i = 0; i <= logicalWidth; i += GRID_SIZE) {
         ctx.beginPath();
         ctx.moveTo(i, 0);
-        ctx.lineTo(i, canvas.height);
+        ctx.lineTo(i, logicalHeight);
         ctx.stroke();
     }
     
     // 绘制水平线
-    for (let j = 0; j <= canvas.height; j += GRID_SIZE) {
+    for (let j = 0; j <= logicalHeight; j += GRID_SIZE) {
         ctx.beginPath();
         ctx.moveTo(0, j);
-        ctx.lineTo(canvas.width, j);
+        ctx.lineTo(logicalWidth, j);
         ctx.stroke();
     }
 }
@@ -264,10 +360,14 @@ function drawNPCs() {
 function drawGenericSnake(snakeBody, headColor, bodyColor, currentDx, currentDy, isPlayer) {
     snakeBody.forEach((segment, index) => {
         const isHead = index === 0;
-        
+
         // 玩家使用彩色数组循环，NPC 使用固定银色
         let color;
-        if (isHead) {
+        if (isRageMode && isPlayer) {
+            // 狂暴模式：彩虹渐变色
+            const hue = (Date.now() / 10 + index * 12) % 360;
+            color = `hsl(${hue}, 100%, 55%)`;
+        } else if (isHead) {
             color = headColor;
         } else if (Array.isArray(bodyColor)) {
             color = bodyColor[(index - 1) % bodyColor.length];
@@ -276,7 +376,8 @@ function drawGenericSnake(snakeBody, headColor, bodyColor, currentDx, currentDy,
         }
 
         // 绘制发光效果
-        ctx.shadowBlur = isHead ? 15 : (isPlayer ? 10 : 8);
+        const baseBlur = isHead ? 15 : (isPlayer ? 10 : 8);
+        ctx.shadowBlur = (isRageMode && isPlayer) ? baseBlur * 2 : baseBlur;
         ctx.shadowColor = color;
         ctx.fillStyle = color;
         
@@ -349,8 +450,19 @@ function drawGenericSnake(snakeBody, headColor, bodyColor, currentDx, currentDy,
 
 function moveSnake() {
     let head;
+    const dpr = window.devicePixelRatio || 1;
+    const logicalWidth = canvas.width / dpr;
+    const logicalHeight = canvas.height / dpr;
+
     if (currentMode === MOVE_MODE.GRID) {
         head = { x: snake[0].x + dx, y: snake[0].y + dy };
+        // 狂暴模式：墙壁穿越
+        if (isRageMode) {
+            const tcx = Math.floor(TILE_COUNT_X);
+            const tcy = Math.floor(TILE_COUNT_Y);
+            head.x = ((head.x % tcx) + tcx) % tcx;
+            head.y = ((head.y % tcy) + tcy) % tcy;
+        }
     } else {
         // 自由模式：基于角度移动
         head = { 
@@ -361,18 +473,20 @@ function moveSnake() {
 
         // 边界反弹逻辑
         let bounced = false;
-        if (head.x <= 10 || head.x >= canvas.width - 10) {
+        if (head.x <= 10 || head.x >= logicalWidth - 10) {
             angle = Math.PI - angle; // 左右反弹
             bounced = true;
         }
-        if (head.y <= 10 || head.y >= canvas.height - 10) {
+        if (head.y <= 10 || head.y >= logicalHeight - 10) {
             angle = -angle; // 上下反弹
             bounced = true;
         }
 
         if (bounced) {
-            triggerShake();
-            if (navigator.vibrate) navigator.vibrate(20);
+            if (!isRageMode) {
+                triggerShake();
+                if (navigator.vibrate) navigator.vibrate(20);
+            }
             // 重新计算位置避免卡墙
             head.x = snake[0].x + Math.cos(angle) * moveSpeed;
             head.y = snake[0].y + Math.sin(angle) * moveSpeed;
@@ -400,8 +514,8 @@ function moveSnake() {
         scoreElement.textContent = score;
         foods.splice(eatenIndex, 1); // 移除被吃的食物
         
-        // 增加速度
-        if (currentMode === MOVE_MODE.GRID && score % 50 === 0 && GAME_SPEED > 50) {
+        // 增加速度 (狂暴模式期间跳过)
+        if (!isRageMode && currentMode === MOVE_MODE.GRID && score % 50 === 0 && GAME_SPEED > 50) {
             GAME_SPEED -= 5;
             clearInterval(gameLoop);
             gameLoop = setInterval(main, GAME_SPEED);
@@ -491,6 +605,10 @@ function moveNPCs() {
             }
         } else {
             // 自由模式 NPC AI
+            const dpr = window.devicePixelRatio || 1;
+            const logicalWidth = canvas.width / dpr;
+            const logicalHeight = canvas.height / dpr;
+
             if (!npc.angle) npc.angle = Math.random() * Math.PI * 2;
             
             // 寻找最近食物并平滑转向
@@ -519,8 +637,8 @@ function moveNPCs() {
             };
 
             // NPC 边界反弹
-            if (head.x <= 10 || head.x >= canvas.width - 10) npc.angle = Math.PI - npc.angle;
-            if (head.y <= 10 || head.y >= canvas.height - 10) npc.angle = -npc.angle;
+            if (head.x <= 10 || head.x >= logicalWidth - 10) npc.angle = Math.PI - npc.angle;
+            if (head.y <= 10 || head.y >= logicalHeight - 10) npc.angle = -npc.angle;
 
             npc.body.unshift(head);
             
@@ -638,13 +756,17 @@ function spawnNPC(count = 1) {
     for (let i = 0; i < count; i++) {
         let x, y, safe;
         let attempts = 0;
+        const dpr = window.devicePixelRatio || 1;
+        const logicalWidth = canvas.width / dpr;
+        const logicalHeight = canvas.height / dpr;
+        
         do {
             if (currentMode === MOVE_MODE.GRID) {
                 x = Math.floor(Math.random() * TILE_COUNT_X);
                 y = Math.floor(Math.random() * TILE_COUNT_Y);
             } else {
-                x = Math.random() * (canvas.width - 40) + 20;
-                y = Math.random() * (canvas.height - 40) + 20;
+                x = Math.random() * (logicalWidth - 40) + 20;
+                y = Math.random() * (logicalHeight - 40) + 20;
             }
             safe = !checkCollision(x, y);
             attempts++;
@@ -671,13 +793,17 @@ function spawnFood(x, y) {
     let newFood = {};
     let valid = false;
     let attempts = 0;
+    const dpr = window.devicePixelRatio || 1;
+    const logicalWidth = canvas.width / dpr;
+    const logicalHeight = canvas.height / dpr;
+
     while (!valid && attempts < 100) {
         if (currentMode === MOVE_MODE.GRID) {
             newFood.x = Math.floor(Math.random() * TILE_COUNT_X);
             newFood.y = Math.floor(Math.random() * TILE_COUNT_Y);
         } else {
-            newFood.x = Math.random() * (canvas.width - 40) + 20;
-            newFood.y = Math.random() * (canvas.height - 40) + 20;
+            newFood.x = Math.random() * (logicalWidth - 40) + 20;
+            newFood.y = Math.random() * (logicalHeight - 40) + 20;
         }
         
         if (!checkCollision(newFood.x, newFood.y)) {
@@ -720,6 +846,9 @@ function drawFoods() {
 }
 
 function checkGameOver() {
+    // 狂暴模式期间无敌
+    if (isRageMode) return;
+
     const head = snake[0];
     
     if (currentMode === MOVE_MODE.GRID) {
@@ -1023,6 +1152,482 @@ function bindTouchControl(element, newDx, newDy) {
     element.addEventListener('mousedown', handleInput);
     element.addEventListener('mouseup', handleRelease);
     element.addEventListener('mouseleave', handleRelease);
+}
+
+// ============ 狂暴模式 ============
+
+// 三击检测
+canvas.addEventListener('click', handleRageTap);
+canvas.addEventListener('touchstart', (e) => {
+    lastTapTime = Date.now();
+    handleRageTap(e);
+}, { passive: true });
+
+function handleRageTap(e) {
+    // touch+click 50ms去重
+    const now = Date.now();
+    if (e.type === 'click' && (now - lastTapTime) < 50) return;
+
+    if (!hasStarted || isGameOver || isPaused || isRageMode) return;
+
+    tapTimestamps.push(now);
+    // 只保留窗口内的时间戳
+    tapTimestamps = tapTimestamps.filter(t => now - t < TRIPLE_TAP_WINDOW);
+
+    if (tapTimestamps.length >= TRIPLE_TAP_COUNT) {
+        tapTimestamps = [];
+        activateRageMode();
+    }
+}
+
+function activateRageMode() {
+    isRageMode = true;
+    rageStartTime = Date.now();
+    ragePhase = 'eat';
+    isVictoryShown = false;
+
+    // 保存当前速度
+    savedGameSpeed = GAME_SPEED;
+    savedMoveSpeed = moveSpeed;
+
+    // 杀死所有NPC
+    for (let i = npcs.length - 1; i >= 0; i--) {
+        killNPC(i);
+    }
+    // 停止NPC刷新
+    if (npcSpawnInterval) { clearInterval(npcSpawnInterval); npcSpawnInterval = null; }
+
+    // 额外撒食物
+    const extraFood = currentMode === MOVE_MODE.GRID ? 15 : 25;
+    for (let i = 0; i < extraFood; i++) spawnFood();
+
+    // 加速
+    if (currentMode === MOVE_MODE.GRID) {
+        GAME_SPEED = RAGE_GRID_SPEED;
+        // 生成zigzag路径
+        rageFillPath = generateZigzagPath();
+        rageFillIndex = 0;
+    } else {
+        moveSpeed = RAGE_FREE_SPEED;
+        GAME_SPEED = 20;
+        rageSweepDir = 1;
+        rageSweepY = 20;
+    }
+
+    clearInterval(gameLoop);
+    gameLoop = setInterval(main, GAME_SPEED);
+
+    // 视觉效果
+    canvas.parentElement.classList.add('rage-mode');
+    if (rageIndicator) rageIndicator.classList.remove('hidden');
+    if (navigator.vibrate) navigator.vibrate([50, 30, 50, 30, 100]);
+
+    // 15秒倒计时结束 → 直接胜利
+    rageTimer = setTimeout(() => {
+        if (!isRageMode || isVictoryShown) return;
+        triggerUltimateVictory();
+    }, RAGE_DURATION);
+}
+
+function deactivateRageMode() {
+    isRageMode = false;
+    ragePhase = 'eat';
+    if (rageTimer) { clearTimeout(rageTimer); rageTimer = null; }
+
+    // 恢复速度
+    GAME_SPEED = savedGameSpeed || 180;
+    moveSpeed = savedMoveSpeed || 5;
+    clearInterval(gameLoop);
+    gameLoop = setInterval(main, GAME_SPEED);
+
+    // 重启NPC
+    if (config.enableNPC) {
+        spawnNPC(2);
+        npcSpawnInterval = setInterval(() => {
+            if (!isGameOver && !isPaused && npcs.length < 5) spawnNPC(2);
+        }, 15000);
+    }
+
+    // 移除视觉效果
+    canvas.parentElement.classList.remove('rage-mode');
+    if (rageIndicator) rageIndicator.classList.add('hidden');
+}
+
+// ---- 网格模式AI ----
+
+function generateZigzagPath() {
+    const path = [];
+    const cols = Math.floor(TILE_COUNT_X);
+    const rows = Math.floor(TILE_COUNT_Y);
+    for (let y = 0; y < rows; y++) {
+        if (y % 2 === 0) {
+            for (let x = 0; x < cols; x++) path.push({ x, y });
+        } else {
+            for (let x = cols - 1; x >= 0; x--) path.push({ x, y });
+        }
+    }
+    return path;
+}
+
+function getRageDirectionGrid() {
+    const head = snake[0];
+    const totalCells = Math.floor(TILE_COUNT_X) * Math.floor(TILE_COUNT_Y);
+
+    // 切换阶段：蛇长>40%格子时进入铺满阶段
+    if (ragePhase === 'eat' && snake.length > totalCells * 0.4) {
+        ragePhase = 'fill';
+        rageFillPath = generateZigzagPath();
+        // 找到最近的路径点开始
+        let minDist = Infinity;
+        for (let i = 0; i < rageFillPath.length; i++) {
+            const d = Math.abs(rageFillPath[i].x - head.x) + Math.abs(rageFillPath[i].y - head.y);
+            if (d < minDist) { minDist = d; rageFillIndex = i; }
+        }
+    }
+
+    if (ragePhase === 'eat') {
+        return chaseNearestFoodGrid(head);
+    } else {
+        return followFillPath(head);
+    }
+}
+
+function chaseNearestFoodGrid(head) {
+    let target = null;
+    let minDist = Infinity;
+    foods.forEach(f => {
+        const d = Math.abs(f.x - head.x) + Math.abs(f.y - head.y);
+        if (d < minDist) { minDist = d; target = f; }
+    });
+
+    if (!target) return { dx: dx || 1, dy: dy || 0 };
+    return chaseTargetGrid(head, target);
+}
+
+function chaseTargetGrid(head, target) {
+    const possibleMoves = [
+        { dx: 0, dy: -1 }, { dx: 0, dy: 1 },
+        { dx: -1, dy: 0 }, { dx: 1, dy: 0 }
+    ];
+
+    // 防掉头
+    const filtered = possibleMoves.filter(m => !(m.dx === -dx && m.dy === -dy));
+
+    // 安全检查（不撞自己头部附近）
+    const safe = filtered.filter(m => {
+        const nx = head.x + m.dx;
+        const ny = head.y + m.dy;
+        // 穿越后的坐标
+        const tcx = Math.floor(TILE_COUNT_X);
+        const tcy = Math.floor(TILE_COUNT_Y);
+        const wx = ((nx % tcx) + tcx) % tcx;
+        const wy = ((ny % tcy) + tcy) % tcy;
+        // 不撞蛇身（忽略最后几节，因为会移走）
+        for (let i = 0; i < snake.length - 2; i++) {
+            if (snake[i].x === wx && snake[i].y === wy) return false;
+        }
+        return true;
+    });
+
+    const candidates = safe.length > 0 ? safe : filtered;
+    if (candidates.length === 0) return { dx: dx || 1, dy: dy || 0 };
+
+    // 选距目标最近的
+    let best = candidates[0];
+    let bestDist = Infinity;
+    candidates.forEach(m => {
+        const tcx = Math.floor(TILE_COUNT_X);
+        const tcy = Math.floor(TILE_COUNT_Y);
+        const nx = ((head.x + m.dx) % tcx + tcx) % tcx;
+        const ny = ((head.y + m.dy) % tcy + tcy) % tcy;
+        const d = Math.abs(nx - target.x) + Math.abs(ny - target.y);
+        if (d < bestDist) { bestDist = d; best = m; }
+    });
+
+    return best;
+}
+
+function followFillPath(head) {
+    // 找路径中下一个未被蛇占据的点
+    const snakeSet = new Set(snake.map(s => `${Math.floor(s.x)},${Math.floor(s.y)}`));
+    let target = null;
+    let searchCount = 0;
+    const pathLen = rageFillPath.length;
+
+    while (searchCount < pathLen) {
+        const idx = (rageFillIndex + searchCount) % pathLen;
+        const p = rageFillPath[idx];
+        if (!snakeSet.has(`${p.x},${p.y}`)) {
+            target = p;
+            rageFillIndex = idx;
+            break;
+        }
+        searchCount++;
+    }
+
+    // 如果沿路径有食物优先吃
+    if (foods.length > 0) {
+        let nearestFood = null;
+        let nearestDist = Infinity;
+        foods.forEach(f => {
+            const d = Math.abs(f.x - head.x) + Math.abs(f.y - head.y);
+            if (d < nearestDist) { nearestDist = d; nearestFood = f; }
+        });
+        if (nearestFood && nearestDist < 8) target = nearestFood;
+    }
+
+    if (!target) target = rageFillPath[rageFillIndex % pathLen];
+    return chaseTargetGrid(head, target);
+}
+
+// ---- 自由模式AI ----
+
+function getRageDirectionFree() {
+    const head = snake[0];
+    const dpr = window.devicePixelRatio || 1;
+    const logicalWidth = canvas.width / dpr;
+    const logicalHeight = canvas.height / dpr;
+    const margin = 15;
+    const boundaryZone = 40; // 提前转向区域
+
+    // 估算覆盖比
+    const gridSize = 20;
+    const totalVCells = Math.floor(logicalWidth / gridSize) * Math.floor(logicalHeight / gridSize);
+    const coveredSet = new Set();
+    snake.forEach(s => {
+        coveredSet.add(`${Math.floor(s.x / gridSize)},${Math.floor(s.y / gridSize)}`);
+    });
+    const coverRatio = coveredSet.size / totalVCells;
+
+    if (ragePhase === 'eat' && coverRatio > 0.35) {
+        ragePhase = 'fill';
+    }
+
+    let targetAngle;
+
+    if (ragePhase === 'eat') {
+        // 追踪最近食物
+        let target = null;
+        let minDist = Infinity;
+        foods.forEach(f => {
+            const d = Math.sqrt((f.x - head.x) ** 2 + (f.y - head.y) ** 2);
+            if (d < minDist) { minDist = d; target = f; }
+        });
+
+        if (target) {
+            targetAngle = Math.atan2(target.y - head.y, target.x - head.x);
+        } else {
+            targetAngle = angle;
+        }
+    } else {
+        // 蛇形扫描：左右往返 + 逐行下移
+        let targetX = rageSweepDir > 0 ? (logicalWidth - margin) : margin;
+        let targetY = rageSweepY;
+
+        const distToEdge = Math.abs(head.x - targetX);
+        if (distToEdge < 25) {
+            rageSweepDir *= -1;
+            rageSweepY += 22;
+            if (rageSweepY > logicalHeight - margin) {
+                rageSweepY = margin;
+            }
+            targetX = rageSweepDir > 0 ? (logicalWidth - margin) : margin;
+            targetY = rageSweepY;
+        }
+
+        targetAngle = Math.atan2(targetY - head.y, targetX - head.x);
+    }
+
+    // 边界主动避让：接近边界时强制转向内侧，不依赖反弹
+    let avoidAngle = null;
+    if (head.x < boundaryZone) {
+        avoidAngle = 0; // 向右
+    } else if (head.x > logicalWidth - boundaryZone) {
+        avoidAngle = Math.PI; // 向左
+    }
+    if (head.y < boundaryZone) {
+        avoidAngle = avoidAngle != null ? (avoidAngle + Math.PI / 2) / 2 : Math.PI / 2; // 向下
+    } else if (head.y > logicalHeight - boundaryZone) {
+        avoidAngle = avoidAngle != null ? (avoidAngle - Math.PI / 2) / 2 : -Math.PI / 2; // 向上
+    }
+
+    if (avoidAngle != null) {
+        // 在边界区域，混合避让角度和目标角度，边界越近避让权重越大
+        const edgeDist = Math.min(head.x, head.y, logicalWidth - head.x, logicalHeight - head.y);
+        const urgency = 1 - Math.max(0, Math.min(1, edgeDist / boundaryZone));
+        // 插值：urgency=1时完全避让，urgency=0时完全追目标
+        let diff1 = avoidAngle - angle;
+        while (diff1 < -Math.PI) diff1 += Math.PI * 2;
+        while (diff1 > Math.PI) diff1 -= Math.PI * 2;
+        let diff2 = targetAngle - angle;
+        while (diff2 < -Math.PI) diff2 += Math.PI * 2;
+        while (diff2 > Math.PI) diff2 -= Math.PI * 2;
+        const blendedDiff = diff1 * urgency + diff2 * (1 - urgency);
+        return angle + blendedDiff * 0.8;
+    }
+
+    // 正常转向：直接用大系数快速对准目标
+    let diff = targetAngle - angle;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    return angle + diff * 0.8;
+}
+
+// ---- 覆盖率计算 ----
+
+function calculateCoverage() {
+    if (currentMode === MOVE_MODE.GRID) {
+        const occupied = new Set();
+        snake.forEach(s => occupied.add(`${Math.floor(s.x)},${Math.floor(s.y)}`));
+        const totalCells = Math.floor(TILE_COUNT_X) * Math.floor(TILE_COUNT_Y);
+        return occupied.size / totalCells;
+    } else {
+        const dpr = window.devicePixelRatio || 1;
+        const logicalWidth = canvas.width / dpr;
+        const logicalHeight = canvas.height / dpr;
+        const vGridSize = 20;
+        const cols = Math.floor(logicalWidth / vGridSize);
+        const rows = Math.floor(logicalHeight / vGridSize);
+        const totalCells = cols * rows;
+        const occupied = new Set();
+        snake.forEach(s => {
+            const cx = Math.floor(s.x / vGridSize);
+            const cy = Math.floor(s.y / vGridSize);
+            occupied.add(`${cx},${cy}`);
+        });
+        return occupied.size / totalCells;
+    }
+}
+
+// ---- 指示器更新 ----
+
+function updateRageIndicator(coverage) {
+    if (!rageTimerEl || !rageCoverageEl) return;
+    const elapsed = Date.now() - rageStartTime;
+    const remaining = Math.max(0, Math.ceil((RAGE_DURATION - elapsed) / 1000));
+    rageTimerEl.textContent = remaining + 's';
+    rageCoverageEl.textContent = Math.floor(coverage * 100) + '%';
+}
+
+// ---- 红色渐晕 ----
+
+function drawRageVignette() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+    const pulse = 0.15 + Math.sin(Date.now() / 200) * 0.08;
+
+    const gradient = ctx.createRadialGradient(w / 2, h / 2, w * 0.3, w / 2, h / 2, w * 0.75);
+    gradient.addColorStop(0, 'rgba(255, 0, 0, 0)');
+    gradient.addColorStop(1, `rgba(255, 0, 0, ${pulse})`);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, w, h);
+}
+
+// ---- 胜利 & 撒花 ----
+
+function triggerUltimateVictory() {
+    isVictoryShown = true;
+    if (rageTimer) { clearTimeout(rageTimer); rageTimer = null; }
+
+    // 停止游戏循环
+    clearInterval(gameLoop);
+
+    // 显示胜利页面
+    if (victoryScoreValue) victoryScoreValue.textContent = score;
+    if (victoryScreen) victoryScreen.classList.remove('hidden');
+
+    // 更新最高分
+    if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('snakeHighScore', highScore);
+        if (highScoreElement) highScoreElement.textContent = highScore;
+    }
+
+    startConfetti();
+    if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 200]);
+}
+
+function startConfetti() {
+    if (!confettiCanvas || !confettiCtx) return;
+
+    // 显示并调整为全屏尺寸
+    confettiCanvas.classList.remove('hidden');
+    confettiCanvas.width = window.innerWidth;
+    confettiCanvas.height = window.innerHeight;
+
+    confettiParticles = [];
+    const colors = ['#ff0000', '#ff7700', '#ffff00', '#00ff00', '#00ccff', '#0044ff', '#aa00ff', '#ff00cc', '#ffd700'];
+
+    for (let i = 0; i < 150; i++) {
+        confettiParticles.push({
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight * -1, // 从上方开始
+            w: Math.random() * 8 + 4,
+            h: Math.random() * 6 + 3,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            vx: (Math.random() - 0.5) * 4,
+            vy: Math.random() * 3 + 2,
+            rotation: Math.random() * 360,
+            rotSpeed: (Math.random() - 0.5) * 10,
+            alpha: 1,
+        });
+    }
+
+    function animateConfetti() {
+        confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+
+        let alive = false;
+        confettiParticles.forEach(p => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.05; // 重力
+            p.rotation += p.rotSpeed;
+
+            // 超出底部后淡出
+            if (p.y > confettiCanvas.height) {
+                p.alpha -= 0.02;
+            }
+
+            if (p.alpha <= 0) return;
+            alive = true;
+
+            confettiCtx.save();
+            confettiCtx.globalAlpha = p.alpha;
+            confettiCtx.translate(p.x, p.y);
+            confettiCtx.rotate((p.rotation * Math.PI) / 180);
+            confettiCtx.fillStyle = p.color;
+            confettiCtx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+            confettiCtx.restore();
+        });
+
+        if (alive) {
+            confettiAnimFrame = requestAnimationFrame(animateConfetti);
+        }
+    }
+
+    confettiAnimFrame = requestAnimationFrame(animateConfetti);
+}
+
+function stopConfetti() {
+    if (confettiAnimFrame) {
+        cancelAnimationFrame(confettiAnimFrame);
+        confettiAnimFrame = null;
+    }
+    confettiParticles = [];
+    if (confettiCtx && confettiCanvas) {
+        confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+        confettiCanvas.classList.add('hidden');
+    }
+}
+
+function resetFromVictory() {
+    if (victoryScreen) victoryScreen.classList.add('hidden');
+    stopConfetti();
+    deactivateRageMode();
+    initGame();
+    if (gameLoop) clearInterval(gameLoop);
+    gameLoop = setInterval(main, GAME_SPEED);
 }
 
 // 初始不启动游戏，只绘制空网格
